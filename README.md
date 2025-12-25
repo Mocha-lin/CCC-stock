@@ -1,2 +1,643 @@
-# CCC-stock
-CCC-1
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model CCC Stock Analyzer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SortableJS for drag and drop -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --sidebar-width: 280px; /* Adjust for 1:5 ratio roughly on large screens */
+        }
+        body { font-family: 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background-color: var(--bg-color); height: 100vh; overflow: hidden; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Sidebar & Layout */
+        #app-container { display: flex; height: 100vh; }
+        #sidebar { width: 20%; min-width: 250px; background: white; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; z-index: 10; }
+        #main-content { flex: 1; overflow-y: auto; position: relative; padding: 20px; }
+
+        /* Drag and Drop Styles */
+        .sortable-ghost { opacity: 0.4; background-color: #f1f5f9; }
+        .folder-drag-over { border: 2px dashed #3b82f6; background-color: #eff6ff; }
+
+        /* Risk Animations */
+        .blink-warning { animation: blink-red 2s infinite; color: #ef4444; font-weight: bold; }
+        .blink-buy { animation: blink-green 2s infinite; color: #22c55e; font-weight: bold; }
+        
+        @keyframes blink-red { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        @keyframes blink-green { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* Tables */
+        .data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+        .data-table th, .data-table td { padding: 8px 12px; border: 1px solid #e2e8f0; text-align: right; }
+        .data-table th { background-color: #f8fafc; font-weight: 600; text-align: center; }
+        .data-table tr:nth-child(even) { background-color: #fcfcfc; }
+
+        /* Mobile Adjustments */
+        @media (max-width: 768px) {
+            #sidebar { position: absolute; height: 100%; transform: translateX(-100%); transition: transform 0.3s; width: 80%; }
+            #sidebar.open { transform: translateX(0); }
+            #main-content { width: 100%; }
+        }
+
+        /* Block Styling */
+        .block-card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
+        .block-title { font-size: 1.1rem; font-weight: 700; color: #1e293b; margin-bottom: 15px; border-left: 4px solid #3b82f6; padding-left: 10px; display: flex; justify-content: space-between; align-items: center;}
+        
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white;}
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <!-- Left Sidebar -->
+    <aside id="sidebar">
+        <div class="p-4 border-b border-gray-200">
+            <h1 class="text-xl font-bold text-gray-800 mb-2"><i class="fas fa-chart-line text-blue-600 mr-2"></i>CCC 分析庫</h1>
+            <div class="relative">
+                <input type="text" id="searchInput" placeholder="搜尋股號或股名..." class="w-full pl-8 pr-3 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <i class="fas fa-search absolute left-3 top-3 text-gray-400 text-xs"></i>
+            </div>
+            <div class="mt-2 flex gap-2">
+                <button onclick="createNewFolder()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-xs py-1 rounded text-gray-600 transition"><i class="fas fa-folder-plus"></i> 建分類</button>
+                <button onclick="toggleImportModal()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-xs py-1 rounded text-white transition"><i class="fas fa-file-import"></i> 匯入代碼</button>
+            </div>
+        </div>
+        
+        <!-- Stock List Container -->
+        <div id="stockList" class="flex-1 overflow-y-auto p-2 space-y-1">
+            <!-- Dynamic Content Here -->
+        </div>
+        
+        <div class="p-2 border-t border-gray-200 text-xs text-center text-gray-400">
+            Auto-saved Locally
+        </div>
+    </aside>
+
+    <!-- Right Main Content -->
+    <main id="main-content">
+        <!-- Mobile Menu Toggle -->
+        <button id="menuToggle" class="md:hidden fixed bottom-4 right-4 bg-blue-600 text-white p-3 rounded-full shadow-lg z-50">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="h-full flex flex-col items-center justify-center text-gray-400">
+            <i class="fas fa-chart-pie text-6xl mb-4 text-gray-200"></i>
+            <p class="text-lg">請點選左側股票或匯入新資料</p>
+            <button onclick="toggleImportModal()" class="mt-4 px-4 py-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition">匯入 Model CCC JSON</button>
+        </div>
+
+        <!-- Analysis Content -->
+        <div id="analysisView" class="hidden max-w-5xl mx-auto pb-20">
+            <!-- Header -->
+            <div class="flex justify-between items-end mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-900" id="headerTitle">2330 台積電</h2>
+                    <p class="text-gray-500 text-sm mt-1">上次更新: <span id="lastUpdated">--</span></p>
+                </div>
+                <button onclick="deleteCurrentStock()" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i> 刪除此報告</button>
+            </div>
+
+            <!-- Block 1: Overview & News -->
+            <div class="block-card">
+                <div class="block-title">第一區塊：即時概況與消息</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <div class="flex items-center gap-4 mb-4">
+                            <div class="text-4xl font-bold text-gray-800" id="stockPrice">--</div>
+                            <div id="stockSplitInfo" class="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded hidden">已拆分</div>
+                        </div>
+                        <div class="space-y-2 text-sm text-gray-700">
+                            <p><strong>護城河：</strong> <span id="moatInfo">--</span></p>
+                            <p><strong>產業地位：</strong> <span id="competitorInfo">--</span></p>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 class="font-bold text-gray-700 mb-2 text-sm">近日消息</h4>
+                        <ul id="newsList" class="text-sm space-y-2 max-h-40 overflow-y-auto">
+                            <!-- News Items -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Block 2: Fundamentals (EPS, Revenue, PE) -->
+            <div class="block-card">
+                <div class="block-title">第二區塊：基本面數據</div>
+                
+                <div class="mb-6">
+                    <h4 class="font-bold text-gray-600 mb-2 text-sm">EPS 預估 (龍頭券商)</h4>
+                    <div class="overflow-x-auto">
+                        <table class="data-table" id="epsTable">
+                            <thead><tr><th>日期</th><th>毛利%</th><th>淨利%</th><th>EPS</th><th>累計EPS</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <h4 class="font-bold text-gray-600 mb-2 text-sm">近12個月營收</h4>
+                        <div class="h-48"><canvas id="revenueChart"></canvas></div>
+                    </div>
+                    <div>
+                        <h4 class="font-bold text-gray-600 mb-2 text-sm">PE 河流圖 & 估值</h4>
+                         <div class="h-48"><canvas id="peChart"></canvas></div>
+                         <div class="mt-2 text-center text-sm">
+                             目前本益比: <span id="currentPE" class="font-bold">--</span> 
+                             (<span id="pePosition">--</span>)
+                             <span id="peDivergence" class="text-xs text-gray-500 block"></span>
+                         </div>
+                    </div>
+                </div>
+                
+                <div class="text-sm text-gray-600">
+                    <strong>股價淨值比 (PB):</strong> <span id="pbRatio">--</span>
+                </div>
+            </div>
+
+            <!-- Block 3: Technical Analysis -->
+            <div class="block-card">
+                <div class="block-title">
+                    第三區塊：技術分析預測
+                    <span id="trendStatus" class="status-badge bg-gray-400">分析中</span>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 text-center">
+                    <div class="p-3 bg-blue-50 rounded border border-blue-100">
+                        <div class="text-xs text-gray-500">30天預測</div>
+                        <div class="font-bold text-blue-700" id="forecast30">--</div>
+                    </div>
+                    <div class="p-3 bg-blue-50 rounded border border-blue-100">
+                        <div class="text-xs text-gray-500">180天預測</div>
+                        <div class="font-bold text-blue-700" id="forecast180">--</div>
+                    </div>
+                    <div class="p-3 bg-blue-50 rounded border border-blue-100">
+                        <div class="text-xs text-gray-500">360天預測</div>
+                        <div class="font-bold text-blue-700" id="forecast360">--</div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                     <p class="text-sm"><strong>進場區間建議：</strong> <span id="entryZone" class="text-green-600 font-bold">--</span></p>
+                     <p class="text-xs text-gray-500 mt-1">結構校正係數 C 值: <span id="cValue">--</span> (基於2020-2025歷史校正)</p>
+                </div>
+
+                <div class="p-3 bg-gray-50 rounded text-sm flex items-center justify-between" id="bollingerContainer">
+                    <span><strong>布林通道狀態：</strong> <span id="bollingerStatus">正常</span></span>
+                    <i class="fas fa-exclamation-triangle hidden" id="bollingerIcon"></i>
+                </div>
+            </div>
+
+            <!-- Block 4: Dividends & Returns -->
+            <div class="block-card">
+                <div class="block-title">第四區塊：股利與報酬率推估</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <table class="data-table" id="dividendTable">
+                            <thead><tr><th>年度</th><th>現金股利</th><th>股票股利</th><th>年化報酬率</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="flex flex-col justify-center bg-green-50 p-4 rounded border border-green-100">
+                        <h4 class="text-sm font-bold text-green-800 mb-2">接續年次預估報酬 (配息再投入)</h4>
+                        <div class="text-3xl font-bold text-green-600 mb-2" id="futureReturn">--%</div>
+                        <p class="text-xs text-green-700">基於過往CAGR與目前估值推算</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Memo Section -->
+            <div class="block-card bg-yellow-50 border-yellow-100">
+                <div class="block-title" style="border-color: #eab308;">
+                    <i class="fas fa-sticky-note text-yellow-500 mr-2"></i> 備忘錄
+                </div>
+                <textarea id="stockMemo" class="w-full h-32 p-3 border border-yellow-200 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" placeholder="在此輸入筆記... (自動儲存)"></textarea>
+            </div>
+            
+            <div class="h-10"></div> <!-- Spacer -->
+        </div>
+    </main>
+</div>
+
+<!-- Import Modal -->
+<div id="importModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white w-11/12 max-w-2xl rounded-lg shadow-2xl p-6">
+        <h3 class="text-xl font-bold mb-4">匯入 CCC Model 資料 (JSON)</h3>
+        <p class="text-sm text-gray-500 mb-2">請將模型生成的 JSON 代碼貼入下方：</p>
+        <textarea id="jsonInput" class="w-full h-64 p-3 border border-gray-300 rounded font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder='{ "id": "2330", "name": "台積電", ... }'></textarea>
+        <div class="flex justify-end gap-3 mt-4">
+            <button onclick="toggleImportModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">取消</button>
+            <button onclick="importData()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">確認匯入</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Data Management ---
+    let appState = {
+        stocks: {}, // keyed by ID (e.g., "2330")
+        folders: { "未分類": [] }, // folderName: [stockIds...]
+        currentStockId: null
+    };
+
+    // Load from LocalStorage
+    function loadState() {
+        const saved = localStorage.getItem('ccc_model_data');
+        if (saved) {
+            appState = JSON.parse(saved);
+        }
+        renderSidebar();
+        if (appState.currentStockId && appState.stocks[appState.currentStockId]) {
+            renderReport(appState.currentStockId);
+        }
+    }
+
+    // Save to LocalStorage
+    function saveState() {
+        localStorage.setItem('ccc_model_data', JSON.stringify(appState));
+    }
+
+    // --- Sidebar Logic ---
+    function renderSidebar() {
+        const listEl = document.getElementById('stockList');
+        const filter = document.getElementById('searchInput').value.toLowerCase();
+        listEl.innerHTML = '';
+
+        // Folders
+        Object.keys(appState.folders).forEach(folderName => {
+            const folderDiv = document.createElement('div');
+            folderDiv.className = 'mb-2';
+            
+            // Folder Header
+            const header = document.createElement('div');
+            header.className = 'flex justify-between items-center px-3 py-1 bg-gray-100 text-gray-600 text-sm font-bold rounded cursor-pointer hover:bg-gray-200';
+            header.innerHTML = `<span><i class="fas fa-folder mr-2 text-yellow-500"></i>${folderName}</span>`;
+            
+            // Only show delete if empty and not default
+            if (folderName !== "未分類" && appState.folders[folderName].length === 0) {
+                 const delBtn = document.createElement('i');
+                 delBtn.className = "fas fa-times text-gray-400 hover:text-red-500 text-xs";
+                 delBtn.onclick = (e) => { e.stopPropagation(); deleteFolder(folderName); };
+                 header.appendChild(delBtn);
+            }
+            folderDiv.appendChild(header);
+
+            // Stock Items Container (Sortable)
+            const itemsDiv = document.createElement('div');
+            itemsDiv.className = 'pl-2 mt-1 space-y-1 min-h-[10px]';
+            itemsDiv.setAttribute('data-folder', folderName);
+
+            // Filter and Render Items
+            const stockIds = appState.folders[folderName];
+            stockIds.forEach(id => {
+                const stock = appState.stocks[id];
+                if (!stock) return; // Clean up ghost ids
+                
+                if (filter && !stock.id.includes(filter) && !stock.name.includes(filter)) return;
+
+                const item = document.createElement('div');
+                item.className = `px-3 py-2 text-sm rounded cursor-pointer flex justify-between items-center group transition ${appState.currentStockId === id ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-600 shadow-sm' : 'hover:bg-gray-50 text-gray-700'}`;
+                item.innerHTML = `
+                    <div>
+                        <span class="font-bold mr-2">${stock.id}</span>
+                        <span>${stock.name}</span>
+                    </div>
+                `;
+                item.onclick = () => renderReport(id);
+                item.setAttribute('data-id', id);
+                itemsDiv.appendChild(item);
+            });
+
+            folderDiv.appendChild(itemsDiv);
+            listEl.appendChild(folderDiv);
+
+            // Initialize Sortable for this folder
+            new Sortable(itemsDiv, {
+                group: 'stocks',
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                onEnd: function (evt) {
+                    handleDragEnd(evt);
+                }
+            });
+        });
+    }
+
+    function handleDragEnd(evt) {
+        const itemEl = evt.item;
+        const stockId = itemEl.getAttribute('data-id');
+        const oldFolder = evt.from.getAttribute('data-folder');
+        const newFolder = evt.to.getAttribute('data-folder');
+        const newIndex = evt.newIndex;
+
+        if (oldFolder === newFolder) {
+            // Reorder within same folder
+            appState.folders[oldFolder].splice(evt.oldIndex, 1);
+            appState.folders[oldFolder].splice(newIndex, 0, stockId);
+        } else {
+            // Move across folders
+            appState.folders[oldFolder].splice(evt.oldIndex, 1);
+            appState.folders[newFolder].splice(newIndex, 0, stockId);
+        }
+        saveState();
+    }
+
+    function createNewFolder() {
+        const name = prompt("輸入分類名稱 (例如: 半導體上游):");
+        if (name && !appState.folders[name]) {
+            appState.folders[name] = [];
+            saveState();
+            renderSidebar();
+        }
+    }
+
+    function deleteFolder(name) {
+        if(confirm(`確定刪除分類 "${name}"?`)) {
+            delete appState.folders[name];
+            saveState();
+            renderSidebar();
+        }
+    }
+
+    document.getElementById('searchInput').addEventListener('input', renderSidebar);
+
+    // --- Core: Render Report ---
+    let revenueChartInstance = null;
+    let peChartInstance = null;
+
+    function renderReport(id) {
+        appState.currentStockId = id;
+        saveState();
+        renderSidebar(); // Highlight active
+        
+        const data = appState.stocks[id];
+        if (!data) return;
+
+        // Toggle Views
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('analysisView').classList.remove('hidden');
+        
+        // Scroll top
+        document.getElementById('main-content').scrollTop = 0;
+
+        // --- Header ---
+        document.getElementById('headerTitle').innerText = `${data.id} ${data.name}`;
+        document.getElementById('lastUpdated').innerText = new Date().toLocaleString(); // Usually data date, simplified here
+
+        // --- Block 1 ---
+        const b1 = data.block1;
+        document.getElementById('stockPrice').innerText = b1.price;
+        document.getElementById('stockSplitInfo').classList.toggle('hidden', !b1.is_split);
+        document.getElementById('moatInfo').innerText = b1.moat || "無顯著資訊";
+        document.getElementById('competitorInfo').innerText = b1.competitors || "無顯著資訊";
+        
+        const newsList = document.getElementById('newsList');
+        newsList.innerHTML = b1.news.map(n => 
+            `<li class="border-b border-gray-100 pb-1">
+                <span class="text-xs text-gray-400 mr-2">${n.date}</span>
+                <span class="${n.type === 'bull' ? 'text-red-600' : 'text-green-600'} font-medium">${n.type === 'bull' ? '▲' : '▼'}</span>
+                ${n.title}
+            </li>`
+        ).join('');
+
+        // --- Block 2 ---
+        const b2 = data.block2;
+        // EPS Table
+        const epsBody = document.querySelector('#epsTable tbody');
+        epsBody.innerHTML = b2.eps_data.map(e => `
+            <tr>
+                <td>${e.date}</td>
+                <td>${e.gross_margin}%</td>
+                <td>${e.net_margin}%</td>
+                <td class="font-bold">${e.eps}</td>
+                <td class="text-gray-500">${e.cum_eps}</td>
+            </tr>
+        `).join('');
+
+        // Charts
+        renderRevenueChart(b2.revenue_data);
+        renderPEChart(b2.pe_data, b1.price);
+
+        document.getElementById('currentPE').innerText = b2.pe_river.current_pe;
+        document.getElementById('pePosition').innerText = b2.pe_river.position_desc; // e.g., "低估"
+        document.getElementById('peDivergence').innerText = b2.divergence_note || "";
+        document.getElementById('pbRatio').innerText = b2.pb_ratio;
+
+        // --- Block 3 ---
+        const b3 = data.block3;
+        const statusBadge = document.getElementById('trendStatus');
+        statusBadge.innerText = b3.trend_status; // e.g., "盤整即將上漲"
+        
+        // Dynamic Status Color
+        if(b3.trend_status.includes("上漲")) statusBadge.className = "status-badge bg-red-500 blink-buy";
+        else if(b3.trend_status.includes("回檔")) statusBadge.className = "status-badge bg-green-600";
+        else statusBadge.className = "status-badge bg-gray-500";
+
+        document.getElementById('forecast30').innerText = b3.forecast_30d;
+        document.getElementById('forecast180').innerText = b3.forecast_180d;
+        document.getElementById('forecast360').innerText = b3.forecast_360d;
+        document.getElementById('entryZone').innerText = b3.entry_zone;
+        document.getElementById('cValue').innerText = b3.c_value;
+
+        // Bollinger Warning
+        const bollStat = document.getElementById('bollingerStatus');
+        const bollIcon = document.getElementById('bollingerIcon');
+        const bollCont = document.getElementById('bollingerContainer');
+        
+        bollStat.innerText = b3.bollinger_status;
+        bollCont.className = "p-3 rounded text-sm flex items-center justify-between transition-colors";
+        
+        if (b3.bollinger_status.includes("超買") || b3.bollinger_status.includes("破底")) {
+            bollCont.classList.add("bg-red-50", "border", "border-red-200");
+            bollStat.classList.add("blink-warning");
+            bollIcon.classList.remove("hidden");
+            bollIcon.className = "fas fa-exclamation-triangle text-red-500";
+        } else {
+            bollCont.classList.add("bg-gray-50");
+            bollStat.classList.remove("blink-warning");
+            bollIcon.classList.add("hidden");
+        }
+
+        // --- Block 4 ---
+        const b4 = data.block4;
+        const divBody = document.querySelector('#dividendTable tbody');
+        divBody.innerHTML = b4.history.map(d => `
+            <tr>
+                <td>${d.year}</td>
+                <td>${d.cash}</td>
+                <td>${d.stock}</td>
+                <td class="${parseFloat(d.yield) > 5 ? 'text-red-600 font-bold' : ''}">${d.yield}%</td>
+            </tr>
+        `).join('');
+        document.getElementById('futureReturn').innerText = b4.projected_return + "%";
+
+        // --- Memo ---
+        const memo = document.getElementById('stockMemo');
+        memo.value = data.memo || "";
+        memo.oninput = function() {
+            appState.stocks[id].memo = this.value;
+            saveState();
+        };
+    }
+
+    // --- Chart Rendering Functions ---
+    function renderRevenueChart(data) {
+        const ctx = document.getElementById('revenueChart').getContext('2d');
+        if (revenueChartInstance) revenueChartInstance.destroy();
+
+        revenueChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.map(d => d.month),
+                datasets: [{
+                    label: '月營收 (億)',
+                    data: data.map(d => d.revenue),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }, {
+                    label: 'YoY (%)',
+                    data: data.map(d => d.yoy),
+                    borderColor: '#10b981',
+                    borderDash: [5, 5],
+                    yAxisID: 'y1',
+                    type: 'line'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    y: { display: true, title: {display: true, text: '營收'} },
+                    y1: { display: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'YoY %'} }
+                }
+            }
+        });
+    }
+
+    function renderPEChart(peData, currentPrice) {
+        const ctx = document.getElementById('peChart').getContext('2d');
+        if (peChartInstance) peChartInstance.destroy();
+
+        // Simplified logic: Using Bar chart to show PE levels roughly
+        // Ideally a "River Chart" requires stacked areas with complex timestamp mapping. 
+        // Here we simulate it with a bar chart showing historical PEs vs Current
+        
+        peChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['PE 8x', 'PE 12x', 'PE 16x', 'PE 20x', 'PE 24x', '目前股價'],
+                datasets: [{
+                    label: '價格位階',
+                    data: [
+                        peData.eps_base * 8, 
+                        peData.eps_base * 12, 
+                        peData.eps_base * 16, 
+                        peData.eps_base * 20, 
+                        peData.eps_base * 24,
+                        parseFloat(currentPrice)
+                    ],
+                    backgroundColor: [
+                        '#e2e8f0', '#cbd5e1', '#94a3b8', '#64748b', '#475569', '#ef4444'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: false } }
+            }
+        });
+    }
+
+    // --- Import / Export ---
+    function toggleImportModal() {
+        const m = document.getElementById('importModal');
+        m.classList.toggle('hidden');
+    }
+
+    function importData() {
+        try {
+            const jsonText = document.getElementById('jsonInput').value;
+            const newData = JSON.parse(jsonText);
+            
+            // Basic Validation
+            if (!newData.id || !newData.name || !newData.block1) {
+                alert("格式錯誤：缺少必要的 ID 或 Name");
+                return;
+            }
+
+            // Update State
+            appState.stocks[newData.id] = newData;
+            
+            // Add to "未分類" if not present in any folder
+            let exists = false;
+            Object.values(appState.folders).forEach(list => { if(list.includes(newData.id)) exists = true; });
+            
+            if (!exists) {
+                appState.folders["未分類"].unshift(newData.id);
+            }
+
+            saveState();
+            renderSidebar();
+            renderReport(newData.id);
+            toggleImportModal();
+            document.getElementById('jsonInput').value = '';
+            alert("匯入成功！");
+
+        } catch (e) {
+            alert("JSON 解析失敗，請檢查格式。\n" + e.message);
+        }
+    }
+
+    function deleteCurrentStock() {
+        if (!appState.currentStockId) return;
+        if (confirm(`確定刪除 ${appState.currentStockId} 的資料嗎？`)) {
+            const id = appState.currentStockId;
+            
+            // Remove from folders
+            Object.keys(appState.folders).forEach(f => {
+                appState.folders[f] = appState.folders[f].filter(x => x !== id);
+            });
+            
+            delete appState.stocks[id];
+            appState.currentStockId = null;
+            
+            saveState();
+            renderSidebar();
+            document.getElementById('analysisView').classList.add('hidden');
+            document.getElementById('emptyState').classList.remove('hidden');
+        }
+    }
+
+    // Mobile Menu
+    document.getElementById('menuToggle').addEventListener('click', () => {
+        document.getElementById('sidebar').classList.toggle('open');
+    });
+
+    // Initialize
+    loadState();
+
+</script>
+</body>
+</html>
