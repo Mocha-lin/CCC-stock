@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCC 股市分析儀表板</title>
+    <!-- Chart.js for Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #F5F5DC; /* 米白色 */
+            --sidebar-bg: #E8E4C9;
+            --card-bg: #FFFFFF;
+            --text-main: #333333;
+            --text-secondary: #666666;
+            --accent-color: #A0522D; /* 穩重的棕色系 */
+            --rise-color: #FF4D4D;
+            --fall-color: #00AA00;
+            --flat-color: #FFD700;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            color: var(--text-main);
+            font-size: 18px; /* 手機易讀大字體 */
+        }
+
+        /* Sidebar Styles */
+        #sidebar {
+            width: 300px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid #CCC;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        @media (max-width: 768px) {
+            #sidebar {
+                display: none; /* Mobile hide sidebar initially */
+                position: absolute;
+                z-index: 100;
+                height: 100%;
+                box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+            }
+            #sidebar.active { display: flex; }
+            .mobile-menu-btn { display: block !important; }
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 101;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            border: 1px solid #AAA;
+            border-radius: 5px;
+        }
+
+        .stock-list-item {
+            background: var(--card-bg);
+            padding: 15px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+            border-left: 5px solid transparent;
+        }
+
+        .stock-list-item:hover, .stock-list-item.active {
+            background: #FFF8DC;
+            border-left: 5px solid var(--accent-color);
+        }
+
+        /* Main Content */
+        #main-content {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .import-section {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        textarea#jsonInput {
+            width: 100%;
+            height: 100px;
+            margin-top: 10px;
+            font-family: monospace;
+        }
+
+        button.btn-primary {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+
+        /* Analysis Blocks */
+        .block-container {
+            background: var(--card-bg);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .block-title {
+            font-size: 22px;
+            font-weight: bold;
+            border-bottom: 2px solid var(--sidebar-bg);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            color: var(--accent-color);
+        }
+
+        .stock-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .stock-price {
+            font-size: 36px;
+            font-weight: bold;
+        }
+
+        .status-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 16px;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        /* Memo */
+        #memo-area {
+            width: 100%;
+            height: 200px;
+            padding: 15px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background: #FFF;
+            line-height: 1.5;
+        }
+
+        /* Grouping */
+        .group-header {
+            font-weight: bold;
+            margin-top: 15px;
+            padding-left: 5px;
+            color: var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Mobile Menu Button -->
+<button class="mobile-menu-btn" onclick="toggleSidebar()">☰ 股票列表</button>
+
+<!-- Sidebar -->
+<nav id="sidebar">
+    <h2 style="text-align:center; color: var(--accent-color);">CCC 庫存分析</h2>
+    <input type="text" id="searchInput" class="search-box" placeholder="搜尋股號或股名..." onkeyup="filterStocks()">
+    
+    <div style="margin-bottom:10px; display:flex; gap:5px;">
+        <input type="text" id="newGroupName" placeholder="新群組名稱" style="width:70%; padding:5px;">
+        <button onclick="createGroup()" style="width:30%;">建立</button>
+    </div>
+
+    <div id="stockListContainer">
+        <!-- Stock list items will be injected here -->
+    </div>
+</nav>
+
+<!-- Main Content -->
+<main id="main-content">
+    
+    <!-- Import Section -->
+    <div class="import-section">
+        <h3>匯入 AI 分析數據</h3>
+        <p style="font-size:14px; color:#666;">請輸入 "ccc 股號" 指令給 AI，並將 AI 產出的 JSON 代碼複製貼上至下方：</p>
+        <textarea id="jsonInput" placeholder='{"id": "2330", "name": "台積電", ...}'></textarea>
+        <button class="btn-primary" onclick="importData()">一鍵匯入 / 更新數據</button>
+        <button class="btn-primary" style="background:#666;" onclick="exportBackup()">備份所有資料</button>
+    </div>
+
+    <!-- Report Container (Hidden until data loaded) -->
+    <div id="reportContainer" style="display:none;">
+        
+        <!-- Header -->
+        <div class="block-container">
+            <div class="stock-header">
+                <div>
+                    <span style="font-size:28px; font-weight:bold;" id="dispName"></span>
+                    <span style="font-size:20px; color:#666;" id="dispId"></span>
+                </div>
+                <div class="stock-price" id="dispPrice"></div>
+                <div id="dispStatus" class="status-badge"></div>
+            </div>
+            <p style="font-size:14px; color:#666;">上次更新: <span id="lastUpdate"></span></p>
+        </div>
+
+        <!-- Block 1: Info & Moat -->
+        <div class="block-container">
+            <div class="block-title">1. 消息與護城河</div>
+            <div id="newsSection"></div>
+            <hr style="margin: 15px 0;">
+            <h4>護城河與競爭優勢：</h4>
+            <p id="moatText" style="line-height:1.6;"></p>
+        </div>
+
+        <!-- Block 2: Fundamentals (EPS/Rev/PE/PB) -->
+        <div class="block-container">
+            <div class="block-title">2. 基本面數據 (EPS/營收/PE)</div>
+            
+            <h4>EPS 預估 (含未來三年)</h4>
+            <div style="overflow-x:auto;">
+                <table id="epsTable">
+                    <thead>
+                        <tr><th>日期</th><th>毛利%</th><th>淨利%</th><th>EPS</th><th>累計EPS</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <h4 style="margin-top:20px;">月營收趨勢</h4>
+            <div style="overflow-x:auto;">
+                <table id="revTable">
+                    <thead><tr><th>月份</th><th>營收(億)</th><th>YoY%</th><th>MoM%</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            
+            <div style="display:flex; flex-wrap:wrap; margin-top:20px;">
+                <div style="flex:1; min-width:300px;">
+                    <h4>PE 河流圖與位置</h4>
+                    <p id="peText"></p>
+                    <canvas id="peChart" height="200"></canvas>
+                </div>
+                <div style="flex:1; min-width:300px; padding-left:20px;">
+                    <h4>股價淨值比 (PB)</h4>
+                    <div id="pbValue" style="font-size:30px; font-weight:bold; color:var(--accent-color);"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Block 3: Tech & Prediction -->
+        <div class="block-container">
+            <div class="block-title">3. 技術分析與 AI 預測</div>
+            
+            <h4>AI 結構校正預測 (信心度校正 C 值)</h4>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap:10px; margin-bottom:20px;">
+                <div style="background:#EEE; padding:15px; text-align:center; border-radius:10px;">
+                    <div style="font-size:14px;">30天 區間</div>
+                    <div id="pred30" style="font-size:20px; font-weight:bold;">-</div>
+                </div>
+                <div style="background:#EEE; padding:15px; text-align:center; border-radius:10px;">
+                    <div style="font-size:14px;">180天 區間</div>
+                    <div id="pred180" style="font-size:20px; font-weight:bold;">-</div>
+                </div>
+                <div style="background:#EEE; padding:15px; text-align:center; border-radius:10px;">
+                    <div style="font-size:14px;">360天 區間</div>
+                    <div id="pred360" style="font-size:20px; font-weight:bold;">-</div>
+                </div>
+            </div>
+
+            <h4>技術指標狀態</h4>
+            <ul>
+                <li><strong>目前狀態：</strong> <span id="techStatus"></span></li>
+                <li><strong>布林通道：</strong> <span id="bollinger"></span></li>
+            </ul>
+        </div>
+
+        <!-- Block 4: Dividend & ROI -->
+        <div class="block-container">
+            <div class="block-title">4. 股息與報酬率分析</div>
+            <div style="display:flex; justify-content:space-around; flex-wrap:wrap;">
+                <div>
+                    <h4>殖利率</h4>
+                    <span id="divYield" style="font-size:24px; color:green;"></span>
+                </div>
+                <div>
+                    <h4>過往年化 (2020~)</h4>
+                    <span id="pastCAGR" style="font-size:24px;"></span>
+                </div>
+                <div>
+                    <h4>預估未來年化</h4>
+                    <span id="futureCAGR" style="font-size:24px; color:var(--rise-color);"></span>
+                </div>
+            </div>
+            <p style="margin-top:10px;">下次除權息：<span id="nextDivDate"></span></p>
+        </div>
+
+        <!-- Memo Section -->
+        <div class="block-container">
+            <div class="block-title">個人備忘錄</div>
+            <textarea id="memo-area" placeholder="在此輸入筆記，將自動儲存..."></textarea>
+            <button class="btn-primary" onclick="saveCurrentMemo()">儲存備忘錄</button>
+        </div>
+
+    </div>
+</main>
+
+<script>
+    // Global Storage
+    let stocksDB = JSON.parse(localStorage.getItem('ccc_stocksDB')) || {};
+    let groups = JSON.parse(localStorage.getItem('ccc_groups')) || {'預設': []};
+    let currentStockId = null;
+    let peChartInstance = null;
+
+    // Initialize
+    window.onload = function() {
+        renderSidebar();
+    };
+
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('active');
+    }
+
+    // --- Core Functions ---
+
+    function importData() {
+        const input = document.getElementById('jsonInput').value;
+        try {
+            const data = JSON.parse(input);
+            if(!data.id || !data.name) throw new Error("缺少股號或股名");
+            
+            // Add timestamp
+            data.lastUpdated = new Date().toLocaleString();
+            
+            // Merge with existing memo if exists
+            if(stocksDB[data.id] && stocksDB[data.id].memo) {
+                data.memo = stocksDB[data.id].memo;
+            } else {
+                data.memo = "";
+            }
+
+            // Save to DB
+            stocksDB[data.id] = data;
+            localStorage.setItem('ccc_stocksDB', JSON.stringify(stocksDB));
+
+            // Add to default group if new
+            let exists = false;
+            for(let g in groups) {
+                if(groups[g].includes(data.id)) exists = true;
+            }
+            if(!exists) {
+                groups['預設'].push(data.id);
+                localStorage.setItem('ccc_groups', JSON.stringify(groups));
+            }
+
+            alert(`成功匯入 ${data.name} (${data.id})`);
+            document.getElementById('jsonInput').value = '';
+            renderSidebar();
+            loadStock(data.id);
+
+        } catch (e) {
+            alert("匯入失敗，請檢查 JSON 格式。\n錯誤：" + e.message);
+        }
+    }
+
+    function loadStock(id) {
+        currentStockId = id;
+        const data = stocksDB[id];
+        if(!data) return;
+
+        document.getElementById('reportContainer').style.display = 'block';
+        
+        // Header
+        document.getElementById('dispName').innerText = data.name;
+        document.getElementById('dispId').innerText = data.id;
+        document.getElementById('dispPrice').innerText = data.price;
+        document.getElementById('lastUpdate').innerText = data.lastUpdated;
+        
+        const statusEl = document.getElementById('dispStatus');
+        statusEl.innerText = data.status;
+        statusEl.style.backgroundColor = data.statusColor || '#999';
+
+        // Block 1: News & Moat
+        const newsHTML = data.news.map(n => 
+            `<div><strong>${n.date}</strong> [${n.type}] ${n.title}</div>`
+        ).join('');
+        document.getElementById('newsSection').innerHTML = newsHTML || "尚無即時消息";
+        document.getElementById('moatText').innerText = data.moat || "無資料";
+
+        // Block 2: Tables
+        renderTable('epsTable', data.epsData, ['period', 'gross', 'net', 'eps', 'cumEps']);
+        renderTable('revTable', data.revenueData, ['month', 'rev', 'yoy', 'mom']);
+        
+        document.getElementById('peText').innerText = `目前本益比: ${data.peData?.currentPE} (${data.peData?.riverStatus})`;
+        document.getElementById('pbValue').innerText = data.pb;
+
+        // Draw PE Chart (Simplified simulation)
+        renderPEChart(data.peData);
+
+        // Block 3: Prediction
+        if(data.prediction) {
+            document.getElementById('pred30').innerText = data.prediction.d30;
+            document.getElementById('pred180').innerText = data.prediction.d180;
+            document.getElementById('pred360').innerText = data.prediction.d360;
+        }
+        document.getElementById('techStatus').innerText = data.status;
+        document.getElementById('bollinger').innerText = data.bollinger;
+
+        // Block 4: Dividend
+        document.getElementById('divYield').innerText = data.dividend?.yield || "-";
+        document.getElementById('nextDivDate').innerText = data.dividend?.nextDate || "-";
+        document.getElementById('pastCAGR').innerText = data.roi?.pastCAGR || "-";
+        document.getElementById('futureCAGR').innerText = data.roi?.futureCAGR || "-";
+
+        // Memo
+        document.getElementById('memo-area').value = data.memo || "";
+
+        // Mobile close sidebar
+        document.getElementById('sidebar').classList.remove('active');
+    }
+
+    function saveCurrentMemo() {
+        if(!currentStockId) return;
+        const memo = document.getElementById('memo-area').value;
+        stocksDB[currentStockId].memo = memo;
+        localStorage.setItem('ccc_stocksDB', JSON.stringify(stocksDB));
+        alert("備忘錄已儲存");
+    }
+
+    // --- UI Helpers ---
+
+    function renderSidebar() {
+        const container = document.getElementById('stockListContainer');
+        container.innerHTML = '';
+
+        for(let groupName in groups) {
+            const groupDiv = document.createElement('div');
+            groupDiv.innerHTML = `<div class="group-header">${groupName}</div>`;
+            
+            groups[groupName].forEach(stockId => {
+                if(stocksDB[stockId]) {
+                    const s = stocksDB[stockId];
+                    const item = document.createElement('div');
+                    item.className = 'stock-list-item';
+                    item.innerHTML = `<strong>${s.id} ${s.name}</strong><br><span style="font-size:12px; color:#666;">${s.status}</span>`;
+                    item.onclick = () => loadStock(s.id);
+                    groupDiv.appendChild(item);
+                }
+            });
+            container.appendChild(groupDiv);
+        }
+    }
+
+    function filterStocks() {
+        const query = document.getElementById('searchInput').value.toLowerCase();
+        const items = document.getElementsByClassName('stock-list-item');
+        for(let item of items) {
+            const text = item.innerText.toLowerCase();
+            item.style.display = text.includes(query) ? 'block' : 'none';
+        }
+    }
+
+    function createGroup() {
+        const name = document.getElementById('newGroupName').value;
+        if(name && !groups[name]) {
+            groups[name] = [];
+            localStorage.setItem('ccc_groups', JSON.stringify(groups));
+            renderSidebar();
+        }
+    }
+
+    function renderTable(tableId, data, keys) {
+        const tbody = document.querySelector(`#${tableId} tbody`);
+        tbody.innerHTML = '';
+        if(!data) return;
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            keys.forEach(k => {
+                const td = document.createElement('td');
+                td.innerText = row[k] !== undefined ? row[k] : '-';
+                // Simple color coding for %
+                if(k === 'yoy' || k === 'mom') {
+                    td.style.color = row[k] > 0 ? 'red' : 'green';
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderPEChart(peData) {
+        if(!peData) return;
+        const ctx = document.getElementById('peChart').getContext('2d');
+        if(peChartInstance) peChartInstance.destroy();
+
+        // Simulate river data for visualization purpose
+        peChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['便宜', '合理', '昂貴', '目前'],
+                datasets: [{
+                    label: '本益比位置',
+                    data: [10, 15, 20, peData.currentPE],
+                    backgroundColor: ['#4CAF50', '#FFD700', '#F44336', '#0000FF']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    function exportBackup() {
+        const backup = JSON.stringify({stocks: stocksDB, groups: groups});
+        const blob = new Blob([backup], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "ccc_stocks_backup.json";
+        a.click();
+    }
+</script>
+
+</body>
+</html>
